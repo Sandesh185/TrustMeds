@@ -1,0 +1,42 @@
+/* Base styles that don't conflict with Tailwind */
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+/* Override any conflicting styles */
+.container {
+  width: 100%;
+  max-width: 1280px;
+}
+
+/* Custom styles for our app */
+.role-card {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.role-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.feature-icon {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+/* Ensure Tailwind utilities take precedence */
+.bg-slate-50 {
+  background-color: #f8fafc !important;
+}
+
+.min-h-screen {
+  min-height: 100vh !important;
+}
+
+/* Fix for any text alignment issues */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+}
