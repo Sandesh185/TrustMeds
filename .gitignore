@@ -45,3 +45,10 @@ coverage/
 # Hardhat
 .openzeppelin/
 
+# TypeScript build info
+*.tsbuildinfo
+
+# Temporary files
+*.tmp
+*.temp
+
