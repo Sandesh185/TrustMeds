@@ -107,25 +107,32 @@ const validateAddress = (req, res, next) => {
  * Middleware to validate product creation data
  */
 const validateProductData = (req, res, next) => {
-  const { productId, manufacturerName, productName, price, expiryDate } = req.body;
+  // productId comes from URL params, not body (for POST /:productId/metadata route)
+  const productId = req.params.productId || req.body.productId;
+  const { manufacturerName, productName, price, expiryDate } = req.body;
   
-  // Required fields
+  // Required fields - but make manufacturerName and productName optional for metadata updates
   if (!isValidProductId(productId)) {
     return res.status(400).json({ error: 'Invalid product ID' });
   }
   
-  if (!manufacturerName || typeof manufacturerName !== 'string' || manufacturerName.trim().length === 0) {
-    return res.status(400).json({ error: 'Manufacturer name is required' });
-  }
-  if (manufacturerName.trim().length > 200) {
-    return res.status(400).json({ error: 'Manufacturer name must be 200 characters or less' });
+  // manufacturerName and productName are optional for metadata updates (may already exist)
+  if (manufacturerName !== undefined) {
+    if (typeof manufacturerName !== 'string' || manufacturerName.trim().length === 0) {
+      return res.status(400).json({ error: 'Manufacturer name must be a non-empty string if provided' });
+    }
+    if (manufacturerName.trim().length > 200) {
+      return res.status(400).json({ error: 'Manufacturer name must be 200 characters or less' });
+    }
   }
   
-  if (!productName || typeof productName !== 'string' || productName.trim().length === 0) {
-    return res.status(400).json({ error: 'Product name is required' });
-  }
-  if (productName.trim().length > 200) {
-    return res.status(400).json({ error: 'Product name must be 200 characters or less' });
+  if (productName !== undefined) {
+    if (typeof productName !== 'string' || productName.trim().length === 0) {
+      return res.status(400).json({ error: 'Product name must be a non-empty string if provided' });
+    }
+    if (productName.trim().length > 200) {
+      return res.status(400).json({ error: 'Product name must be 200 characters or less' });
+    }
   }
   
   // Validate price
@@ -138,16 +145,18 @@ const validateProductData = (req, res, next) => {
   
   // Validate expiry date
   if (expiryDate !== undefined) {
-    const expiryNum = Number(expiryDate);
-    if (isNaN(expiryNum) || expiryNum <= Date.now()) {
-      return res.status(400).json({ error: 'Invalid expiry date' });
+    const expiryNum = typeof expiryDate === 'string' ? new Date(expiryDate).getTime() : Number(expiryDate);
+    if (isNaN(expiryNum)) {
+      return res.status(400).json({ error: 'Invalid expiry date format' });
     }
   }
   
-  // Sanitize string fields
-  req.body.productId = sanitizeString(productId);
-  req.body.manufacturerName = sanitizeString(manufacturerName);
-  req.body.productName = sanitizeString(productName);
+  // Sanitize string fields (only if they exist)
+  if (productId) req.body.productId = sanitizeString(productId);
+  if (manufacturerName) req.body.manufacturerName = sanitizeString(manufacturerName);
+  if (productName) req.body.productName = sanitizeString(productName);
+  
+  next();
   
   if (req.body.productCode) {
     req.body.productCode = sanitizeString(req.body.productCode);

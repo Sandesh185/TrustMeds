@@ -1337,9 +1337,11 @@ const setupEventListeners = () => {
   console.log(`📋 Contract Address: ${contractAddress}`);
 
   // Listen for ProductCreated events
+  console.log('🎧 Setting up ProductCreated event listener...');
   contract.on('ProductCreated', async (...args) => {
-    console.log('🔔 ProductCreated event received!');
+    console.log('🔔🔔🔔 ProductCreated event received! 🔔🔔🔔');
     console.log(`   Event args count: ${args.length}`);
+    console.log(`   Args:`, args.map((arg, i) => `[${i}]: ${typeof arg} - ${JSON.stringify(arg).substring(0, 100)}`));
     try {
       // ethers.js v6 passes: (indexedParams..., regularParams..., eventObject)
       // Last argument is the event object with full details
@@ -1497,6 +1499,11 @@ const setupEventListeners = () => {
       
       // Store event in Firebase (with retry and error handling)
       try {
+        console.log(`💾 Attempting to store ProductCreated event in Firebase...`);
+        console.log(`   Product ID: ${actualProductId}`);
+        console.log(`   Manufacturer: ${manufacturerStr}`);
+        console.log(`   Product Name: ${productNameStr}`);
+        
         const productData = {
           productId: actualProductId,
           manufacturer: manufacturerStr,
@@ -1510,19 +1517,27 @@ const setupEventListeners = () => {
           _eventTimestamp: new Date() // When the event was processed
         };
         
+        console.log(`📤 Calling firebaseService.storeProductMetadata...`);
         const result = await firebaseService.storeProductMetadata(productData);
+        
+        console.log(`📥 Result from storeProductMetadata:`, JSON.stringify(result, null, 2));
         
         if (result.success) {
           console.log(`✅ Product metadata stored in Firebase: ${actualProductId}`);
           console.log(`   Firebase document ID: ${result.productId || actualProductId}`);
         } else if (result.offline) {
           console.log(`⚠️ Firebase is offline - product will be synced when Firebase comes back online`);
+        } else if (result.skipped) {
+          console.error(`⚠️ Firebase write was skipped: ${result.error || 'Unknown reason'}`);
         } else {
           console.error(`⚠️ Failed to store product metadata in Firebase: ${result.error || 'Unknown error'}`);
+          console.error(`   Full result:`, result);
         }
       } catch (firebaseError) {
         // Non-critical error - log but continue
-        console.error(`⚠️ Failed to store product metadata in Firebase for ${actualProductId}:`, firebaseError.message);
+        console.error(`❌ Exception while storing product metadata in Firebase for ${actualProductId}:`);
+        console.error(`   Error message: ${firebaseError.message}`);
+        console.error(`   Error stack:`, firebaseError.stack);
         console.error(`   Error details:`, firebaseError);
         // Event listener continues to work even if Firebase fails
       }
@@ -1789,6 +1804,105 @@ const setupEventListeners = () => {
   console.log('✅ Blockchain event listeners set up successfully');
   console.log('📡 Listening for events on contract:', contractAddress);
   console.log('💾 Events will be automatically synced to Firebase');
+  
+  // Also query past events to catch any that were missed while server was down
+  queryPastProductCreatedEvents();
+};
+
+// Query past ProductCreated events (catches events from when server was offline)
+const queryPastProductCreatedEvents = async () => {
+  if (!contract || !contractInterface) {
+    console.warn('⚠️ Cannot query past events - contract not initialized');
+    return;
+  }
+  
+  try {
+    console.log('🔍 Querying past ProductCreated events (last 1000 blocks)...');
+    const currentBlock = await provider.getBlockNumber();
+    console.log(`   Current block: ${currentBlock}`);
+    const fromBlock = Math.max(0, currentBlock - 1000); // Last 1000 blocks
+    console.log(`   Querying from block ${fromBlock} to ${currentBlock}`);
+    
+    const filter = contract.filters.ProductCreated();
+    console.log(`   Filter created, querying...`);
+    const pastEvents = await contract.queryFilter(filter, fromBlock, 'latest');
+    
+    console.log(`📋 Found ${pastEvents.length} past ProductCreated events`);
+    
+    if (pastEvents.length === 0) {
+      console.log('ℹ️  No past events found (this is normal if no products were created recently)');
+    }
+    
+    if (pastEvents.length > 0) {
+      console.log('🔄 Processing past events to sync to Firebase...');
+      for (const event of pastEvents) {
+        try {
+          // Process each past event as if it just happened
+          const eventObj = event;
+          const txHash = eventObj.transactionHash || '';
+          const blockNumber = eventObj.blockNumber?.toString() || '';
+          
+          // Try to extract productId from transaction
+          let productId = null;
+          try {
+            const tx = await provider.getTransaction(txHash);
+            if (tx && tx.data) {
+              const decoded = contract.interface.parseTransaction({ data: tx.data });
+              if (decoded && decoded.args && decoded.args.length > 0) {
+                productId = String(decoded.args[0] || '').trim();
+              }
+            }
+          } catch (decodeError) {
+            console.log(`⚠️ Could not decode productId from past event TX: ${txHash.slice(0, 10)}...`);
+          }
+          
+          if (productId && productId !== '' && productId !== 'undefined') {
+            // Parse event args
+            const args = eventObj.args || [];
+            const manufacturerName = String(args[2] || '');
+            const productName = String(args[3] || '');
+            const timestamp = args[4] || Date.now();
+            
+            console.log(`📦 Processing past ProductCreated event: ${productId}`);
+            
+            const productData = {
+              productId,
+              manufacturer: String(args[1] || ''),
+              manufacturerName,
+              productName,
+              eventType: 'ProductCreated',
+              blockNumber,
+              transactionHash: txHash,
+              timestamp: timestamp ? new Date(Number(timestamp) * 1000) : new Date(),
+              _syncedByEventListener: true,
+              _eventTimestamp: new Date(),
+              _pastEventSync: true // Flag to indicate this was synced from past events
+            };
+            
+            const result = await firebaseService.storeProductMetadata(productData);
+            if (result.success) {
+              console.log(`✅ Synced past product to Firebase: ${productId}`);
+            } else if (result.skipped) {
+              console.log(`⚠️ Skipped syncing past product (already exists or error): ${productId}`);
+            } else {
+              console.log(`⚠️ Failed to sync past product: ${productId} - ${result.error}`);
+            }
+          }
+        } catch (eventError) {
+          console.error(`⚠️ Error processing past event:`, eventError.message);
+        }
+      }
+      console.log('✅ Finished syncing past events');
+    } else {
+      console.log('✅ Past events query completed (no events to sync)');
+    }
+  } catch (error) {
+    console.error('❌ Error querying past events:', error.message);
+    console.error('   Error details:', error);
+    // Non-critical - continue even if past event query fails
+  }
+  
+  console.log('✅ Event listener setup complete - ready to receive new events');
 };
 
 // Export setupEventListeners function (will be a no-op if contract is not initialized)

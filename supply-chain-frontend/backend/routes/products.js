@@ -94,13 +94,15 @@ router.get('/:productId', validateProductId, async (req, res) => {
 
 // Create/update product metadata (off-chain)
 router.post('/:productId/metadata', validateProductId, validateProductData, async (req, res) => {
+  const { productId } = req.params || {};
+  
+  // Ensure we have a productId
+  if (!productId) {
+    return res.status(400).json({ error: 'Product ID is required' });
+  }
+  
   try {
-    const { productId } = req.params;
     const metadata = req.body;
-    
-    console.log(`📦 Storing product metadata in Firebase: ${productId}`);
-    console.log(`   Product Name: ${metadata.productName || 'N/A'}`);
-    console.log(`   Manufacturer: ${metadata.manufacturerName || metadata.manufacturer || 'N/A'}`);
     
     // Store metadata in Firebase
     const result = await firebaseService.storeProductMetadata({
@@ -109,21 +111,40 @@ router.post('/:productId/metadata', validateProductId, validateProductData, asyn
       updatedAt: new Date()
     });
     
-    if (result.success) {
-      console.log(`✅ Product metadata stored successfully in Firebase: ${productId}`);
-    } else if (result.offline) {
-      console.log(`⚠️ Firebase is offline - product will be synced when Firebase comes back online`);
-    } else {
-      console.error(`❌ Failed to store product metadata: ${result.error || 'Unknown error'}`);
+    if (!result) {
+      throw new Error('Firebase service returned undefined result');
     }
     
-    res.json({ success: true, ...result });
+    // Send response based on result - only if headers not already sent
+    if (res.headersSent) {
+      return; // Response already sent, don't try again
+    }
+    
+    if (result.success) {
+      console.log(`✅ Product created: ${productId}`);
+      return res.json({ success: true, productId, ...result });
+    } else if (result.offline) {
+      console.log(`⚠️ Firebase offline - will sync later: ${productId}`);
+      return res.json({ success: false, offline: true, productId, ...result });
+    } else if (result.skipped) {
+      console.error(`❌ Skipped: ${productId} - ${result.error || 'Unknown reason'}`);
+      return res.status(400).json({ success: false, skipped: true, productId, ...result });
+    } else {
+      console.error(`❌ Failed: ${productId} - ${result.error || 'Unknown error'}`);
+      return res.status(500).json({ success: false, productId, ...result });
+    }
   } catch (error) {
-    console.error('❌ Error storing product metadata:', error);
-    res.status(500).json({ 
-      error: 'Failed to store product metadata',
-      message: error?.message || 'Unknown error'
-    });
+    // Only send error response if headers not already sent
+    if (!res.headersSent) {
+      console.error(`❌ Error storing product ${productId || 'unknown'}: ${error.message}`);
+      return res.status(500).json({ 
+        error: 'Failed to store product metadata',
+        message: error?.message || 'Unknown error'
+      });
+    } else {
+      // Headers already sent, just log the error
+      console.error(`❌ Error after response sent for product ${productId || 'unknown'}: ${error.message}`);
+    }
   }
 });
 

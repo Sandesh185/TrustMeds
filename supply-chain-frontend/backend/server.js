@@ -131,6 +131,14 @@ app.use(express.json());
 // Rate limiting - 100 requests per minute per IP/wallet
 app.use('/api', rateLimiter(60000, 100));
 
+// Log all incoming API requests (BEFORE routes) - only for non-health checks
+app.use('/api', (req, res, next) => {
+  if (req.path !== '/health') {
+    console.log(`📥 ${req.method} ${req.path}`);
+  }
+  next();
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 // Apply auth middleware to protected routes

@@ -29,16 +29,46 @@ try {
     }
   } else if (hasGoogleCredsPath) {
     try {
+      const fs = require('fs');
+      const path = require('path');
+      const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+      
+      // Resolve relative paths
+      const resolvedPath = path.isAbsolute(credsPath) 
+        ? credsPath 
+        : path.resolve(__dirname, '..', credsPath);
+      
+      if (!fs.existsSync(resolvedPath)) {
+        throw new Error(`Service account file not found: ${resolvedPath}`);
+      }
+      
+      const serviceAccount = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
+      // Use the project ID from the service account, not from .env (they might differ)
+      const projectId = serviceAccount.project_id || process.env.FIREBASE_PROJECT_ID;
       admin.initializeApp({
-        credential: admin.credential.applicationDefault(),
-        projectId: process.env.FIREBASE_PROJECT_ID,
+        credential: admin.credential.cert(serviceAccount),
+        projectId: projectId,
       });
       db = admin.firestore();
       adminInitialized = true;
       useAdmin = true;
       console.log('✅ Firebase Admin initialized with GOOGLE_APPLICATION_CREDENTIALS');
+      console.log(`   Using service account: ${serviceAccount.client_email}`);
+      console.log(`   Service Account Project ID: ${serviceAccount.project_id}`);
+      console.log(`   .env Project ID: ${process.env.FIREBASE_PROJECT_ID}`);
+      console.log(`   Using Project ID: ${projectId}`);
+      console.log(`   useAdmin flag: ${useAdmin} (Firebase writes enabled)`);
+      
+      // Warn if project IDs don't match
+      if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_PROJECT_ID !== serviceAccount.project_id) {
+        console.warn(`⚠️  Project ID mismatch detected!`);
+        console.warn(`   Service account is for: ${serviceAccount.project_id}`);
+        console.warn(`   .env has: ${process.env.FIREBASE_PROJECT_ID}`);
+        console.warn(`   Using service account project ID: ${projectId}`);
+      }
     } catch (credError) {
       console.error('❌ Failed to initialize with GOOGLE_APPLICATION_CREDENTIALS:', credError.message);
+      console.error('   Path attempted:', process.env.GOOGLE_APPLICATION_CREDENTIALS);
     }
   } else {
     // Try to initialize without explicit credentials (for development/testing)
@@ -83,9 +113,13 @@ if (!adminInitialized) {
     db = getFirestore(app);
     console.warn('⚠️ Firebase client SDK initialized (writes will fail without Admin SDK credentials)');
     console.warn('💡 Backend requires Firebase Admin SDK for writes. Client SDK is read-only.');
+    console.warn(`   useAdmin flag: ${useAdmin}, adminInitialized: ${adminInitialized}`);
   } catch (error) {
     console.error('❌ Firebase client initialization error:', error.message);
   }
+} else {
+  // Log final state after initialization
+  console.log(`✅ Firebase initialization complete - useAdmin: ${useAdmin}, adminInitialized: ${adminInitialized}`);
 }
 
 // Helper abstractions to unify admin vs client operations
@@ -99,7 +133,11 @@ const makeDocRef = (collectionName, docId) => {
 };
 
 const setDocument = async (ref, data) => {
-  return useAdmin ? ref.set(data, { merge: true }) : clientApi.setDoc(ref, data);
+  if (useAdmin) {
+    return await ref.set(data, { merge: true });
+  } else {
+    return await clientApi.setDoc(ref, data);
+  }
 };
 
 const updateDocument = async (ref, data) => {
@@ -199,28 +237,29 @@ const storeProductMetadata = async (productData) => {
   // Prevent writes if Admin SDK is not initialized (client SDK will fail)
   if (!useAdmin) {
     console.warn('⚠️ Skipping Firebase write - Admin SDK not initialized');
+    console.warn(`   useAdmin flag: ${useAdmin}, adminInitialized: ${adminInitialized}`);
     console.warn('💡 Set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS in .env to enable writes');
     return { success: false, productId: productData.productId, error: 'Firebase Admin SDK not initialized', skipped: true };
   }
-
+  
   try {
     const productId = String(productData.productId || '').trim();
     if (!productId || productId === '' || productId === 'undefined') {
       throw new Error(`Product ID is required. Received: ${JSON.stringify(productData.productId)}`);
     }
 
-    console.log('💾 Storing product metadata in Firebase:', {
-      productId,
-      manufacturer: productData.manufacturer || 'N/A',
-      productName: productData.productName || 'N/A',
-      transactionHash: productData.transactionHash || 'N/A',
-    });
-
     const productRef = makeDocRef('products', productId);
     const timestamps = useAdmin ? { createdAt: admin.firestore.FieldValue.serverTimestamp(), updatedAt: admin.firestore.FieldValue.serverTimestamp() } : { createdAt: new Date(), updatedAt: new Date() };
-    await setDocument(productRef, { ...productData, productId, ...timestamps });
+    
+    // Merge with existing data if it exists (don't overwrite)
+    const existingDoc = await getDocument(productRef);
+    const existingData = useAdmin ? (existingDoc.exists ? existingDoc.data() : null) : (existingDoc.exists() ? existingDoc.data() : null);
+    
+    // Merge data: existing data takes precedence for fields that exist, new data fills in missing fields
+    const mergedData = existingData ? { ...productData, ...existingData, productId, ...timestamps } : { ...productData, productId, ...timestamps };
+    
+    await setDocument(productRef, mergedData);
 
-    console.log(`✅ Successfully stored product in Firebase: ${productId}`);
     return { success: true, productId };
   } catch (error) {
     if (isFirebaseOfflineError(error)) {
@@ -240,8 +279,17 @@ const storeProductMetadata = async (productData) => {
       return { success: false, productId: productData.productId, error: 'Permission denied - Admin SDK not configured', skipped: true };
     }
 
-    console.error('❌ Error storing product metadata:', error);
-    console.error('   Product data:', JSON.stringify(productData, null, 2));
+    console.error('\n❌❌❌ ERROR STORING PRODUCT METADATA ❌❌❌');
+    console.error(`   Error code: ${error.code || 'N/A'}`);
+    console.error(`   Error message: ${error.message || 'N/A'}`);
+    console.error(`   Error stack: ${error.stack ? error.stack.substring(0, 500) : 'N/A'}`);
+    console.error(`   Product ID: ${productData.productId}`);
+    console.error(`   Product data keys: ${Object.keys(productData).join(', ')}`);
+    console.error(`   useAdmin: ${useAdmin}`);
+    console.error(`   adminInitialized: ${adminInitialized}`);
+    console.error(`   db type: ${useAdmin ? 'Admin SDK' : 'Client SDK'}`);
+    console.error(`   Full product data:`, JSON.stringify(productData, null, 2));
+    console.error('❌❌❌ END ERROR ❌❌❌\n');
     return { success: false, productId: productData.productId, error: error.message };
   }
 };
@@ -358,10 +406,17 @@ const storeTransferRecord = async (transferData) => {
 
     // Check for PERMISSION_DENIED - return gracefully instead of throwing
     if (error.code === 'permission-denied' || error.message?.includes('PERMISSION_DENIED')) {
-      console.warn('\n⚠️ FIREBASE PERMISSION ERROR (Store Transfer):');
-      console.warn('   Missing Admin SDK credentials. Transfer record not stored.');
-      console.warn('   💡 Set FIREBASE_SERVICE_ACCOUNT_JSON or GOOGLE_APPLICATION_CREDENTIALS in .env\n');
-      return { success: false, error: 'Permission denied - Admin SDK not configured', skipped: true };
+      console.error('\n❌ FIREBASE PERMISSION ERROR (Store Transfer):');
+      console.error(`   Error code: ${error.code}`);
+      console.error(`   Error message: ${error.message}`);
+      console.error(`   useAdmin flag: ${useAdmin}`);
+      console.error(`   adminInitialized: ${adminInitialized}`);
+      console.error('   This might be due to:');
+      console.error('   1. Project ID mismatch between service account and .env');
+      console.error('   2. Firestore security rules blocking writes');
+      console.error('   3. Service account missing Firestore permissions');
+      console.error('   💡 Check Firebase Console > Firestore > Rules\n');
+      return { success: false, error: `Permission denied: ${error.message}`, skipped: true };
     }
 
     console.error('Error storing transfer record:', error);
