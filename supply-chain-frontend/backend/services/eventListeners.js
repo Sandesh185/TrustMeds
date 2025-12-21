@@ -1241,24 +1241,40 @@ const DRUG_CHAIN_ABI = [
 	  ]
 
 // Connect to Ethereum network with fallback RPCs
-const getRpcUrl = () => {
-  // Try environment variable first
+const getRpcUrls = () => {
+  const urls = [];
+  
+  // Try environment variable first (but avoid problematic endpoints)
   if (process.env.INFURA_URL && !process.env.INFURA_URL.includes('ethereum-sepolia-rpc.publicnode.com')) {
-    return process.env.INFURA_URL;
+    urls.push(process.env.INFURA_URL);
   }
-  // Fallback to working public RPCs (prioritize most reliable)
-  const fallbackRPCs = [
-    'https://rpc.sepolia.org', // Official Sepolia RPC (most reliable)
-    'https://sepolia-rpc.publicnode.com', // PublicNode Sepolia (alternative)
-    'https://eth-sepolia.g.alchemy.com/v2/demo', // Alchemy demo endpoint
+  
+  // Add reliable public RPCs
+  const publicRPCs = [
+    'https://ethereum-sepolia.publicnode.com', // Good reliability
+    'https://1rpc.io/sepolia',                 // Good reliability
+    'https://sepolia.drpc.org',                // Good reliability
+    'https://rpc.sepolia.org',                 // Official (can be slow)
+    'https://eth-sepolia.g.alchemy.com/v2/demo' // Alchemy demo
   ];
-  return fallbackRPCs[0]; // Use most reliable first
+  
+  urls.push(...publicRPCs);
+  return urls;
 };
 
-// Create provider with retry logic
+// Create provider with retry logic using FallbackProvider
 let provider = null;
 try {
-  provider = new ethers.JsonRpcProvider(getRpcUrl());
+  const rpcUrls = getRpcUrls();
+  console.log(`Initializing event listeners provider with ${rpcUrls.length} endpoints`);
+  
+  if (rpcUrls.length === 1) {
+    provider = new ethers.JsonRpcProvider(rpcUrls[0]);
+  } else {
+    const providers = rpcUrls.map(url => new ethers.JsonRpcProvider(url));
+    // Use FallbackProvider for redundancy
+    provider = new ethers.FallbackProvider(providers);
+  }
 } catch (error) {
   console.error('Failed to create RPC provider:', error.message);
   // Try fallback RPC
@@ -1619,7 +1635,7 @@ const setupEventListeners = () => {
         // Store transfer record with transaction hash as temporary identifier
         // The frontend API call will update this with the correct productId
         try {
-          await firebaseService.storeTransferRecord({
+          const result = await firebaseService.storeTransferRecord({
             productId: `tx_${txHash.slice(2, 18)}`, // Temporary ID based on transaction hash
             from: fromAddress,
             to: toAddress,
@@ -1630,7 +1646,11 @@ const setupEventListeners = () => {
             eventType: 'OwnershipTransferred',
             pendingProductId: true // Flag to indicate we need to update productId later
           });
-          console.log(`✅ Transfer record stored in Firebase (TX: ${txHash.slice(0, 10)}...)`);
+          if (result.success) {
+            console.log(`✅ Transfer record stored in Firebase (TX: ${txHash.slice(0, 10)}...)`);
+          } else if (result.skipped) {
+            console.log(`⚠️ Transfer record skipped - Firebase Admin SDK not configured (TX: ${txHash.slice(0, 10)}...)`);
+          }
         } catch (firebaseError) {
           console.error('Error storing transfer record:', firebaseError.message);
         }
@@ -1639,7 +1659,7 @@ const setupEventListeners = () => {
         console.log(`📝 OwnershipTransferred event detected - ProductId: ${productId}, TX: ${txHash.slice(0, 10)}...`);
         
         try {
-          await firebaseService.storeTransferRecord({
+          const result = await firebaseService.storeTransferRecord({
             productId: productId,
             from: fromAddress,
             to: toAddress,
@@ -1649,18 +1669,25 @@ const setupEventListeners = () => {
             timestamp: timestampVal ? new Date(Number(timestampVal) * 1000) : new Date(),
             eventType: 'OwnershipTransferred'
           });
-          console.log(`✅ Transfer record stored in Firebase: ${productId}`);
-          
-          // Also update product status and current owner in Firebase
-          try {
-            await firebaseService.updateProductStatus(productId, statusStr, null, {
-              currentOwner: toAddress,
-              lastTransferTxHash: txHash,
-              lastTransferBlockNumber: blockNumber
-            });
-          } catch (updateError) {
-            // Non-critical - log but continue
-            console.warn(`⚠️ Failed to update product status in Firebase for ${productId}:`, updateError.message);
+          if (result.success) {
+            console.log(`✅ Transfer record stored in Firebase: ${productId}`);
+            
+            // Also update product status and current owner in Firebase
+            try {
+              const updateResult = await firebaseService.updateProductStatus(productId, statusStr, null, {
+                currentOwner: toAddress,
+                lastTransferTxHash: txHash,
+                lastTransferBlockNumber: blockNumber
+              });
+              if (!updateResult.success && !updateResult.skipped) {
+                console.warn(`⚠️ Failed to update product status in Firebase for ${productId}:`, updateResult.error);
+              }
+            } catch (updateError) {
+              // Non-critical - log but continue
+              console.warn(`⚠️ Failed to update product status in Firebase for ${productId}:`, updateError.message);
+            }
+          } else if (result.skipped) {
+            console.log(`⚠️ Transfer record skipped - Firebase Admin SDK not configured: ${productId}`);
           }
         } catch (firebaseError) {
           // Non-critical error - log but continue
@@ -1728,8 +1755,14 @@ const setupEventListeners = () => {
         console.log(`📝 StatusUpdated event detected - ProductId: ${productId}, Status: ${statusStr || 'N/A'}, TX: ${txHash.slice(0, 10)}...`);
         
         try {
-          await firebaseService.updateProductStatus(productId, statusStr, null);
-          console.log(`✅ Product status updated in Firebase: ${productId} -> ${statusStr}`);
+          const result = await firebaseService.updateProductStatus(productId, statusStr, null);
+          if (result.success) {
+            console.log(`✅ Product status updated in Firebase: ${productId} -> ${statusStr}`);
+          } else if (result.skipped) {
+            console.log(`⚠️ Product status update skipped - Firebase Admin SDK not configured: ${productId}`);
+          } else {
+            console.warn(`⚠️ Failed to update product status in Firebase for ${productId}:`, result.error);
+          }
         } catch (firebaseError) {
           // Non-critical error - log but continue
           console.error(`⚠️ Failed to update product status in Firebase for ${productId}:`, firebaseError.message);

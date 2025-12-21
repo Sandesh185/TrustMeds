@@ -1238,27 +1238,44 @@ const DRUG_CHAIN_ABI = [
 
 
 // Connect to Ethereum network with fallback RPCs
-const getRpcUrl = () => {
+const getRpcUrls = () => {
+  const urls = [];
+  
   // Try environment variable first (but avoid problematic endpoints)
   if (process.env.INFURA_URL && !process.env.INFURA_URL.includes('ethereum-sepolia-rpc.publicnode.com')) {
-    return process.env.INFURA_URL;
+    urls.push(process.env.INFURA_URL);
   }
-  // Fallback to working public RPCs (prioritize most reliable)
-  const fallbackRPCs = [
-    'https://rpc.sepolia.org', // Official Sepolia RPC (most reliable)
-    'https://sepolia-rpc.publicnode.com', // PublicNode Sepolia (alternative)
-    'https://eth-sepolia.g.alchemy.com/v2/demo', // Alchemy demo endpoint
+  
+  // Add reliable public RPCs
+  const publicRPCs = [
+    'https://ethereum-sepolia.publicnode.com', // Good reliability
+    'https://1rpc.io/sepolia',                 // Good reliability
+    'https://sepolia.drpc.org',                // Good reliability
+    'https://rpc.sepolia.org',                 // Official (can be slow)
+    'https://eth-sepolia.g.alchemy.com/v2/demo' // Alchemy demo
   ];
-  return fallbackRPCs[0]; // Use most reliable first
+  
+  urls.push(...publicRPCs);
+  return urls;
 };
 
-// Create provider with retry logic
+// Create provider with retry logic using FallbackProvider
 let provider = null;
 try {
-  provider = new ethers.JsonRpcProvider(getRpcUrl());
+  const rpcUrls = getRpcUrls();
+  console.log(`Initializing blockchain provider with ${rpcUrls.length} endpoints`);
+  
+  if (rpcUrls.length === 1) {
+    provider = new ethers.JsonRpcProvider(rpcUrls[0]);
+  } else {
+    const providers = rpcUrls.map(url => new ethers.JsonRpcProvider(url));
+    // Use FallbackProvider for redundancy
+    // Quorum defaults to 1, which means we just need one successful response
+    provider = new ethers.FallbackProvider(providers);
+  }
 } catch (error) {
   console.error('Failed to create RPC provider:', error.message);
-  // Try fallback RPC
+  // Fallback to a single default if everything fails
   provider = new ethers.JsonRpcProvider('https://rpc.sepolia.org');
 }
 
