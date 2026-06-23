@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
+import { SEPOLIA_CHAIN_ID_HEX, getSepoliaRpcUrls } from '../utils/network';
 
 export type ParticipantRole = 'manufacturer' | 'distributor' | 'deliveryHub' | 'customer';
 
@@ -91,7 +92,7 @@ export const useParticipantWeb3 = (participant: ParticipantRole) => {
 
         // Ensure Sepolia network
         const currentChain = await provider.send('eth_chainId', []);
-        const sepoliaHex = '0xaa36a7'; // 11155111
+        const sepoliaHex = SEPOLIA_CHAIN_ID_HEX;
         if (currentChain !== sepoliaHex) {
           try {
             await (window as any).ethereum.request({
@@ -105,7 +106,7 @@ export const useParticipantWeb3 = (participant: ParticipantRole) => {
                 params: [{
                   chainId: sepoliaHex,
                   chainName: 'Sepolia Testnet',
-                  rpcUrls: ['https://sepolia.infura.io/v3/6dab3e86aa4d434eb6eacc622ffbab80'],
+                  rpcUrls: getSepoliaRpcUrls(),
                   blockExplorerUrls: ['https://sepolia.etherscan.io'],
                 }],
               });

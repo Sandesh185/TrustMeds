@@ -8,7 +8,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["node", "hardhat"]
+    "types": ["node"]
   },
-  "include": ["hardhat.config.ts", "scripts", "test", "tasks", "contracts"]
+  "include": ["vite.config.ts"]
 }

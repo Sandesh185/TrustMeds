@@ -1,5 +1,6 @@
 // src/utils/blockchain.ts
 import { ethers } from "ethers";
+import { getSepoliaRpcUrls } from "./network";
 
 /**
  * Full working blockchain service for your frontend (TypeScript).
@@ -18,21 +19,9 @@ export const CONTRACT_ADDRESS =
   import.meta.env.VITE_CONTRACT_ADDRESS || 
   "0x3c17A630689F50a023c9c6E49cFfEDA3c49291E1";
 
-// Parse RPC URLs from environment or use defaults
-const getRpcUrls = (): string[] => {
-  const envUrls = import.meta.env.VITE_RPC_URLS;
-  if (envUrls) {
-    return envUrls.split(',').map((url: string) => url.trim());
-  }
-  // Fallback to default RPC URLs
-  return [
-    "https://rpc.sepolia.org", // Public Sepolia RPC (free, no API key needed)
-    "https://ethereum-sepolia-rpc.publicnode.com", // PublicNode (free)
-    "https://sepolia-rpc.publicnode.com", // PublicNode alternative
-    "https://sepolia.infura.io/v3/6dab3e86aa4d434eb6eacc622ffbab80", // Infura (may have rate limits)
-    "https://sepolia.gateway.tenderly.co", // Tenderly
-  ];
-};
+const getRpcUrls = (): string[] => getSepoliaRpcUrls();
+
+export const SEPOLIA_PUBLIC_RPC = getSepoliaRpcUrls()[0];
 
 export const NETWORK_CONFIG = {
   chainId: Number(import.meta.env.VITE_NETWORK_CHAIN_ID) || 11155111, // Sepolia

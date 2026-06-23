@@ -901,7 +901,7 @@ const CustomerDashboard = () => {
             // CRITICAL: Validate ALL locations in history, not just the current one
             // If ANY location in the product's journey was unauthorized, the product is suspicious
             let hasInvalidLocation = false;
-            let validationWarnings: string[] = [];
+            const validationWarnings: string[] = [];
             
             // Validate each history entry's location
             for (let idx = 0; idx < productHistoryForValidation.length; idx++) {
@@ -1304,7 +1304,7 @@ const CustomerDashboard = () => {
       }
       // Support common non-ISO formats like dd-mm-yyyy, dd/mm/yyyy, yyyy-mm-dd, mm-dd-yyyy
       // Prefer day-first interpretation when ambiguous
-      const dayFirst = s.match(/^([0-3]?\d)[-\/](0?\d|1[0-2])[-\/]((?:19|20)?\d{2})$/);
+      const dayFirst = s.match(/^([0-3]?\d)[-/](0?\d|1[0-2])[-/]((?:19|20)?\d{2})$/);
       if (dayFirst) {
         const day = Number(dayFirst[1]);
         const month = Number(dayFirst[2]);
@@ -1313,7 +1313,7 @@ const CustomerDashboard = () => {
         const dt = new Date(year, month - 1, day);
         return isNaN(dt.getTime()) ? null : dt;
       }
-      const yearFirst = s.match(/^((?:19|20)\d{2})[-\/](0?\d|1[0-2])[-\/]([0-3]?\d)$/);
+      const yearFirst = s.match(/^((?:19|20)\d{2})[-/](0?\d|1[0-2])[-/]([0-3]?\d)$/);
       if (yearFirst) {
         const year = Number(yearFirst[1]);
         const month = Number(yearFirst[2]);
@@ -1321,7 +1321,7 @@ const CustomerDashboard = () => {
         const dt = new Date(year, month - 1, day);
         return isNaN(dt.getTime()) ? null : dt;
       }
-      const monthFirst = s.match(/^(0?\d|1[0-2])[-\/]([0-3]?\d)[-\/]((?:19|20)?\d{2})$/);
+      const monthFirst = s.match(/^(0?\d|1[0-2])[-/]([0-3]?\d)[-/]((?:19|20)?\d{2})$/);
       if (monthFirst) {
         const month = Number(monthFirst[1]);
         const day = Number(monthFirst[2]);

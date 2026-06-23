@@ -26,7 +26,7 @@ module.exports = {
       chainId: 1337,
     },
     sepolia: {
-      url: process.env.INFURA_URL || "https://sepolia.infura.io/v3/6dab3e86aa4d434eb6eacc622ffbab80",
+      url: process.env.INFURA_URL || process.env.SEPOLIA_RPC_URL || "https://rpc.sepolia.org",
       accounts: SEPOLIA_PRIVATE_KEY ? [SEPOLIA_PRIVATE_KEY] : [],
       chainId: 11155111,
     },

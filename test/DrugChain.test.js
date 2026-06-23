@@ -1,27 +1,27 @@
 // Smart Contract Tests using Hardhat
-// Run with: npx hardhat test
+// Run with: npm test (from repo root)
+const { expect } = require("chai");
+const { ethers } = require("hardhat");
 
-import { expect } from "chai";
-import { ethers } from "hardhat";
-import { DrugChain, DrugChain__factory } from "../typechain";
+async function futureExpiry() {
+  const block = await ethers.provider.getBlock("latest");
+  return block.timestamp + 365 * 24 * 60 * 60;
+}
 
 describe("DrugChain", function () {
-  let drugChain: DrugChain;
-  let owner: any;
-  let manufacturer: any;
-  let distributor: any;
-  let customer: any;
+  let drugChain;
+  let owner;
+  let manufacturer;
+  let distributor;
+  let customer;
 
   beforeEach(async function () {
-    // Get signers
     [owner, manufacturer, distributor, customer] = await ethers.getSigners();
 
-    // Deploy contract
-    const DrugChainFactory = (await ethers.getContractFactory("DrugChain")) as DrugChain__factory;
+    const DrugChainFactory = await ethers.getContractFactory("DrugChain");
     drugChain = await DrugChainFactory.deploy();
     await drugChain.waitForDeployment();
 
-    // Authorize manufacturer
     await drugChain.connect(owner).authorizeManufacturer(manufacturer.address);
   });
 
@@ -33,8 +33,10 @@ describe("DrugChain", function () {
       const productCode = "CODE-001";
       const category = "Pharmaceutical";
       const price = ethers.parseEther("1.0");
-      const latitude = 12345678; // 12.345678 scaled
-      const longitude = 98765432; // 98.765432 scaled
+      const latitude = 12345678;
+      const longitude = 98765432;
+
+      const expiryDate = await futureExpiry();
 
       await expect(
         drugChain.connect(manufacturer).createProduct(
@@ -46,8 +48,8 @@ describe("DrugChain", function () {
           price,
           latitude,
           longitude,
-          0, // expiryDate = 0 means no expiry
-          "" // batchNumber
+          expiryDate,
+          ""
         )
       ).to.emit(drugChain, "ProductCreated");
 
@@ -58,8 +60,8 @@ describe("DrugChain", function () {
     });
 
     it("Should reject product creation from unauthorized manufacturer", async function () {
-      const unauthorized = await ethers.getSigner(customer.address);
-
+      const unauthorized = customer;
+      const expiryDate = await futureExpiry();
       await expect(
         drugChain.connect(unauthorized).createProduct(
           "PROD-002",
@@ -70,7 +72,7 @@ describe("DrugChain", function () {
           ethers.parseEther("1.0"),
           0,
           0,
-          0,
+          expiryDate,
           ""
         )
       ).to.be.revertedWith("Not an authorized manufacturer");
@@ -78,8 +80,7 @@ describe("DrugChain", function () {
 
     it("Should reject duplicate product IDs", async function () {
       const productId = "PROD-003";
-
-      // Create first product
+      const expiryDate = await futureExpiry();
       await drugChain.connect(manufacturer).createProduct(
         productId,
         "Manufacturer",
@@ -89,11 +90,10 @@ describe("DrugChain", function () {
         ethers.parseEther("1.0"),
         0,
         0,
-        0,
+        expiryDate,
         ""
       );
 
-      // Try to create duplicate
       await expect(
         drugChain.connect(manufacturer).createProduct(
           productId,
@@ -104,7 +104,7 @@ describe("DrugChain", function () {
           ethers.parseEther("1.0"),
           0,
           0,
-          0,
+          expiryDate,
           ""
         )
       ).to.be.revertedWith("Product already exists");
@@ -113,7 +113,7 @@ describe("DrugChain", function () {
 
   describe("Ownership Transfer", function () {
     beforeEach(async function () {
-      // Create a product first
+      const expiryDate = await futureExpiry();
       await drugChain.connect(manufacturer).createProduct(
         "PROD-TRANSFER",
         "Manufacturer",
@@ -123,23 +123,19 @@ describe("DrugChain", function () {
         ethers.parseEther("1.0"),
         0,
         0,
-        0,
+        expiryDate,
         ""
       );
     });
 
     it("Should transfer ownership", async function () {
       const productId = "PROD-TRANSFER";
-      const latitude = 12345678;
-      const longitude = 98765432;
 
       await expect(
         drugChain.connect(manufacturer).transferOwnership(
           productId,
           distributor.address,
-          "Transferred to Distributor",
-          latitude,
-          longitude
+          "Transferred to Distributor"
         )
       ).to.emit(drugChain, "OwnershipTransferred");
 
@@ -152,16 +148,15 @@ describe("DrugChain", function () {
         drugChain.connect(customer).transferOwnership(
           "PROD-TRANSFER",
           customer.address,
-          "Status",
-          0,
-          0
+          "Status"
         )
-      ).to.be.revertedWith("Only current owner can transfer");
+      ).to.be.revertedWith("Not the owner of this product");
     });
   });
 
   describe("Status Updates", function () {
     beforeEach(async function () {
+      const expiryDate = await futureExpiry();
       await drugChain.connect(manufacturer).createProduct(
         "PROD-STATUS",
         "Manufacturer",
@@ -171,7 +166,7 @@ describe("DrugChain", function () {
         ethers.parseEther("1.0"),
         0,
         0,
-        0,
+        expiryDate,
         ""
       );
     });
@@ -179,16 +174,9 @@ describe("DrugChain", function () {
     it("Should update product status", async function () {
       const productId = "PROD-STATUS";
       const newStatus = "In Transit";
-      const latitude = 12345678;
-      const longitude = 98765432;
 
       await expect(
-        drugChain.connect(manufacturer).updateStatus(
-          productId,
-          newStatus,
-          latitude,
-          longitude
-        )
+        drugChain.connect(manufacturer).updateStatus(productId, newStatus)
       ).to.emit(drugChain, "StatusUpdated");
 
       const product = await drugChain.getProduct(productId);
@@ -197,21 +185,14 @@ describe("DrugChain", function () {
 
     it("Should reject status update from non-owner", async function () {
       await expect(
-        drugChain.connect(customer).updateStatus(
-          "PROD-STATUS",
-          "Delivered",
-          0,
-          0
-        )
-      ).to.be.revertedWith("Only current owner can update status");
+        drugChain.connect(customer).updateStatus("PROD-STATUS", "Delivered")
+      ).to.be.revertedWith("Not the owner of this product");
     });
   });
 
   describe("Manufacturer Authorization", function () {
     it("Should authorize a manufacturer", async function () {
-      const newManufacturer = await ethers.getSigner(
-        ethers.Wallet.createRandom().address
-      );
+      const [, , , , newManufacturer] = await ethers.getSigners();
 
       await expect(
         drugChain.connect(owner).authorizeManufacturer(newManufacturer.address)
@@ -222,19 +203,17 @@ describe("DrugChain", function () {
     });
 
     it("Should only allow owner to authorize manufacturers", async function () {
-      const newManufacturer = await ethers.getSigner(
-        ethers.Wallet.createRandom().address
-      );
+      const [, , , , newManufacturer] = await ethers.getSigners();
 
       await expect(
         drugChain.connect(manufacturer).authorizeManufacturer(newManufacturer.address)
-      ).to.be.revertedWith("Only contract owner can authorize manufacturers");
+      ).to.be.revertedWith("Only contract owner can perform this action");
     });
 
     it("Should revoke manufacturer authorization", async function () {
       await expect(
-        drugChain.connect(owner).revokeManufacturerAuthorization(manufacturer.address)
-      ).to.emit(drugChain, "ManufacturerAuthorizationRevoked");
+        drugChain.connect(owner).revokeManufacturer(manufacturer.address)
+      ).to.emit(drugChain, "ManufacturerRevoked");
 
       const isAuthorized = await drugChain.authorizedManufacturers(manufacturer.address);
       expect(isAuthorized).to.be.false;
@@ -243,6 +222,7 @@ describe("DrugChain", function () {
 
   describe("Product Verification", function () {
     beforeEach(async function () {
+      const expiryDate = await futureExpiry();
       await drugChain.connect(manufacturer).createProduct(
         "PROD-VERIFY",
         "Manufacturer",
@@ -252,21 +232,20 @@ describe("DrugChain", function () {
         ethers.parseEther("1.0"),
         0,
         0,
-        0,
+        expiryDate,
         ""
       );
     });
 
     it("Should verify authentic product", async function () {
-      const verification = await drugChain.verifyProduct("PROD-VERIFY");
-      expect(verification.isAuthentic).to.be.true;
-      expect(verification.isValidManufacturer).to.be.true;
+      const isAuthentic = await drugChain.verifyProduct("PROD-VERIFY");
+      expect(isAuthentic).to.be.true;
     });
 
-    it("Should return false for non-existent product", async function () {
-      const verification = await drugChain.verifyProduct("NONEXISTENT");
-      expect(verification.existsOnChain).to.be.false;
+    it("Should revert for non-existent product", async function () {
+      await expect(
+        drugChain.verifyProduct("NONEXISTENT")
+      ).to.be.revertedWith("Product does not exist");
     });
   });
 });
-
